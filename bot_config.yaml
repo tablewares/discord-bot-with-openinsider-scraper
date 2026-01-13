@@ -1,0 +1,4 @@
+bot:
+  status: 1234567890 
+  data: 0987654321 #leave one empty for the bot to send to only one channel
+  token: your token #your application token retreived from your discord app
