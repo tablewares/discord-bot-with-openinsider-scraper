@@ -9,18 +9,25 @@ import datetime
 from typing import List, Dict
 import hashlib
 import pathlib
+import yaml
 
 # -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
 
+with open('bot_config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
 
-# Retrieve token from environment variables
+#change these values in bot_config.yaml, must be changed default values don't work
 TOKEN = os.getenv('DISCORD_TOKEN')
+STATUS_CHANNEL_ID = config['bot']['status']  # Channel for status/logs
+DATA_CHANNEL_ID = config['bot']['data']  # Channel for CSV data embeds
 
-# REPLACE THESE WITH YOUR ACTUAL CHANNEL IDS (integers)
-STATUS_CHANNEL_ID = 1440521058632597516  # Channel for status/logs
-DATA_CHANNEL_ID = 1443087328364068926  # Channel for CSV data embeds
+if STATUS_CHANNEL_ID is None:
+    STATUS_CHANNEL_ID = DATA_CHANNEL_ID
+if DATA_CHANNEL_ID is None:
+    DATA_CHANNEL_ID = STATUS_CHANNEL_ID
+
 
 # File Paths
 CSV_PATH = os.path.expanduser("~/openinsiderData/data/insider_trades.csv")
@@ -110,7 +117,7 @@ async def on_ready():
     print('Logged in as')
     print(bot.user.name)
     print(bot.user.id)
-    scanner_loop.start()
+    await scanner_loop.start()
 
 
 # -------------------------------------------------------------------------
