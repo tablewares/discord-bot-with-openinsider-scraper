@@ -5,5 +5,7 @@ bot: #where the bots will send their messages
 filter:
   quantity: 20000 #the amount of stocks a trade detail must have before it is sent to the server
   date: 5 #the maximum date before the trade cannot be reported (when the trade was performed? the data in the csv is ambigious)
-  
-  
+
+special: #values to measure a trade as special (yellow)
+  quantity: 300000 
+  date: 2
