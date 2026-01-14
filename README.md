@@ -1,4 +1,4 @@
-# discord-bot-with-openinsider-scraper
+```# discord-bot-with-openinsider-scraper
 
 A basic discord bot that utilizes the openinsider scraper tool from https://github.com/sd3v/openinsiderData.git to send updates to a specified channel for alerts of new Insider trades.
 
@@ -62,4 +62,4 @@ docker run -env-file .env my_bot
 
 This application works best in a always on vm
 Check the data yourself, data format may be messed up and may not even be reliable or true.
-Note: a e2 micro vm from google cloud is free, look up proper configurations to get one for free
+Note: a e2 micro vm from google cloud is free, look up proper configurations to get one for free```
