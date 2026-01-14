@@ -1,4 +1,3 @@
-import subprocess
 import discord
 from discord.ext import commands, tasks
 import pandas as pd
@@ -10,6 +9,7 @@ from typing import List, Dict
 import hashlib
 import pathlib
 import yaml
+from openinsider_scraper import OpenInsiderScraper
 
 # -------------------------------------------------------------------------
 # Configuration
@@ -22,6 +22,9 @@ with open('bot_config.yaml', 'r') as f:
 TOKEN = os.getenv('DISCORD_TOKEN')
 STATUS_CHANNEL_ID = config['bot']['status']  # Channel for status/logs
 DATA_CHANNEL_ID = config['bot']['data']  # Channel for CSV data embeds
+
+minimum_quantity = config['filter']['quantity']
+maximum_date = config['filter']['date']
 
 if STATUS_CHANNEL_ID is None:
     STATUS_CHANNEL_ID = DATA_CHANNEL_ID
@@ -177,8 +180,8 @@ def create_trade_embed(row, is_special: bool) -> discord.Embed:
 
 
 @tasks.loop(minutes=30)
-async def scanner_loop(force=False):
-    """Background task logic."""
+async def scanner_loop(force=False) -> bool:
+    """Background task logic. False if scanner failed. Force for ignoring history file"""
 
     await bot.wait_until_ready()
     status_channel = bot.get_channel(STATUS_CHANNEL_ID)
@@ -186,7 +189,9 @@ async def scanner_loop(force=False):
 
     try:
         # 1. Run Scraper
-        subprocess.run(['python3', 'openinsider_scraper.py'])
+        scraper = OpenInsiderScraper
+        await asyncio.to_thread(scraper.scrape)
+
         # 2. Load Data
         df = get_data()
         processed_ids = load_persistence()
@@ -199,8 +204,8 @@ async def scanner_loop(force=False):
             now = datetime.datetime.now()
 
             # Base Filter: Last 5 days AND Qty > 20,000
-            mask_date = (now - df['trade_date_dt']).dt.days <= 5
-            mask_qty = df['clean_qty'] > 20000
+            mask_date = (now - df['trade_date_dt']).dt.days <= maximum_date
+            mask_qty = df['clean_qty'] > minimum_quantity
             filtered_df = df[mask_date & mask_qty]
 
             for index, row in filtered_df.iterrows():
@@ -223,7 +228,7 @@ async def scanner_loop(force=False):
 
             # Update persistence
             save_persistence(new_processed_ids)
-            # print(f"trades received: {filtered_df}")
+            print('Scanner loop completed')
 
     except Exception as e:
         await status_channel.send(f"Scanner error: {e}")
@@ -267,7 +272,8 @@ async def force_scanner(ctx):
 
     value = await scanner_loop(force=True)
 
-    await scanner_loop.stop()
+    if value:
+        await scanner_loop.stop()
 
     await ctx.send("Finished.")
 
@@ -321,7 +327,7 @@ async def analysis_top_three(ctx):
         # Days ago (add 1 to avoid division by zero)
         days = (now - row['trade_date_dt']).days
         days = max(0, days)  # Ensure no negative
-        recency_score = (1 / (days + 1)) * 10000
+        recency_score = (1 / ((days - 1) + 1)) * 10000
 
         qty_score = row['clean_qty'] * 0.01
         value_score = row['clean_value'] * 0.001
