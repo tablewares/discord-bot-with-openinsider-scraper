@@ -7,9 +7,8 @@ import json
 import datetime
 from typing import List, Dict
 import hashlib
-import pathlib
+from pathlib import Path
 import yaml
-from openinsider_scraper import OpenInsiderScraper
 
 # -------------------------------------------------------------------------
 # Configuration
@@ -18,13 +17,28 @@ from openinsider_scraper import OpenInsiderScraper
 with open('bot_config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
-#change these values in bot_config.yaml, must be changed default values don't work
+#change these values in bot_config.yaml
 TOKEN = os.getenv('DISCORD_TOKEN')
 STATUS_CHANNEL_ID = config['bot']['status']  # Channel for status/logs
 DATA_CHANNEL_ID = config['bot']['data']  # Channel for CSV data embeds
+timespan = config['bot']['period']
 
 minimum_quantity = config['filter']['quantity']
 maximum_date = config['filter']['date']
+
+special_quantity = config['special']['quantity']
+special_date = config['special']['date']
+
+
+if os.getenv('DATA'):
+    DATA_CHANNEL_ID = os.getenv('DATA')
+    if not os.getenv('STATUS'):
+        STATUS_CHANNEL_ID = DATA_CHANNEL_ID
+
+if os.getenv('STATUS'):
+    STATUS_CHANNEL_ID = os.getenv('STATUS')
+    if not os.getenv('DATA'):
+        DATA_CHANNEL_ID = STATUS_CHANNEL_ID
 
 if STATUS_CHANNEL_ID is None:
     STATUS_CHANNEL_ID = DATA_CHANNEL_ID
@@ -32,11 +46,13 @@ if DATA_CHANNEL_ID is None:
     DATA_CHANNEL_ID = STATUS_CHANNEL_ID
 
 
-# File Paths
-CSV_PATH = os.path.expanduser("~/openinsiderData/data/insider_trades.csv")
-PERSISTENCE_FILE = "processed_trades.json"
-SCRAPER_SCRIPT = "openinsider_scraper.py"
 
+# File Paths
+CSV_PATH = Path("data/insider_trades.csv")
+PERSISTENCE_FILE = Path("data/processed_trades.json")
+
+if not os.path.exists("data"):
+    os.makedirs("data")
 
 # -------------------------------------------------------------------------
 # Data Processing Helpers
@@ -79,6 +95,8 @@ def save_persistence(processed_ids: List[str]):
 def get_data() -> pd.DataFrame:
     """Reads CSV, cleans data types, and returns DataFrame."""
     if not os.path.exists(CSV_PATH):
+        channel = asyncio.run(bot.get_channel(STATUS_CHANNEL_ID))
+        asyncio.run(channel.send("Can't find csv file"))
         return pd.DataFrame()
 
     try:
@@ -114,13 +132,12 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # State management
 bot.scanner_running = False
 
-
 @bot.event
 async def on_ready():
     print('Logged in as')
     print(bot.user.name)
     print(bot.user.id)
-    await scanner_loop.start()
+    print("enter !start to start scraping")
 
 
 # -------------------------------------------------------------------------
@@ -179,9 +196,9 @@ def create_trade_embed(row, is_special: bool) -> discord.Embed:
 # -------------------------------------------------------------------------
 
 
-@tasks.loop(minutes=30)
-async def scanner_loop(force=False) -> bool:
-    """Background task logic. False if scanner failed. Force for ignoring history file"""
+@tasks.loop(minutes=timespan)
+async def scanner_loop(force=False) -> None:
+    """Background task logic. Force for ignoring history file"""
 
     await bot.wait_until_ready()
     status_channel = bot.get_channel(STATUS_CHANNEL_ID)
@@ -189,8 +206,7 @@ async def scanner_loop(force=False) -> bool:
 
     try:
         # 1. Run Scraper
-        scraper = OpenInsiderScraper
-        await asyncio.to_thread(scraper.scrape)
+        await asyncio.create_subprocess_shell('python3 openinsider_scraper.py')
 
         # 2. Load Data
         df = get_data()
@@ -218,7 +234,7 @@ async def scanner_loop(force=False) -> bool:
                 # Special Logic
                 # Special if: <= 2 days ago OR Qty > 300,000
                 days_diff = (now - row['trade_date_dt']).days
-                is_special = (days_diff <= 2) or (row['clean_qty'] > 300000)
+                is_special = (days_diff <= special_date) or (row['clean_qty'] > special_quantity)
 
                 # Send Embed
                 embed = create_trade_embed(row, is_special)
@@ -228,13 +244,11 @@ async def scanner_loop(force=False) -> bool:
 
             # Update persistence
             save_persistence(new_processed_ids)
+
             print('Scanner loop completed')
 
     except Exception as e:
-        await status_channel.send(f"Scanner error: {e}")
-        return False
-
-    return True
+        status_channel.send(f"Error: {e}")
 
 
 # -------------------------------------------------------------------------
@@ -247,7 +261,6 @@ async def start_scanner(ctx):
     if bot.scanner_running:
         await ctx.send("Scanner is already running.")
         return
-
     bot.scanner_running = True
     await scanner_loop.start()
 
@@ -256,10 +269,20 @@ async def start_scanner(ctx):
     if status_channel:
         await status_channel.send("Scanner started via command.")
 
+@bot.command(name="stop")
+async def stop(ctx):
+    try:
+        bot.scanner_running = False
+        await scanner_loop.stop()
+
+        ctx.send('Scanner stopped')
+    except Exception as e:
+        await ctx.send(f"Scanner was already off, probably {e}")
 
 @bot.command(name='status')
 async def status_scanner(ctx):
     """Checks if the scanner loop is running."""
+
     state = "Running" if bot.scanner_running else "Stopped"
     await ctx.send(f"Scanner Status: {state}")
 
@@ -267,16 +290,14 @@ async def status_scanner(ctx):
 @bot.command(name='force')
 async def force_scanner(ctx):
     """Forces the scanner to output something."""
-    if bot.scanner_running:
-        await scanner_loop.stop()
+    try:
+        if bot.scanner_running:
+            await scanner_loop.stop()
 
-    value = await scanner_loop(force=True)
-
-    if value:
-        await scanner_loop.stop()
-
-    await ctx.send("Finished.")
-
+        await scanner_loop(force=True)
+        await ctx.send('Forced scan complete')
+    except:
+        pass
 
 @bot.command(name='today')
 async def today_trades(ctx):
@@ -312,6 +333,7 @@ async def today_trades(ctx):
 async def analysis_top_three(ctx):
     """Scores and returns top 3 stocks from data."""
     df = get_data()
+
     if df.empty:
         await ctx.send("No data available for analysis.")
         return
