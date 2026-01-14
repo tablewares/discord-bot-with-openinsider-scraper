@@ -10,6 +10,9 @@ COPY requirements.txt .
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+RUN mkdir -p data
+VOLUME ["/app/data"]
+
 # Copy application code
 COPY . .
 
